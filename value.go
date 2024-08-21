@@ -92,11 +92,13 @@ func (v *value) String() string {
 }
 
 func (v *value) CanAddr() bool {
-	return reflectValueElem(v.v).CanAddr()
+	return true
+	// return reflectValueElem(v.v).CanAddr()
 }
 
 func (v *value) Addr() reflect.Value {
-	return reflectValueElem(v.v).Addr()
+	return v.instantiate().Addr()
+	// return reflectValueElem(v.v).Addr()
 }
 
 func (v *value) Len() int {
@@ -152,6 +154,14 @@ func (v *value) SetString(x string) {
 
 func (v *value) Set(x reflect.Value) {
 	v.instantiate().Set(x)
+}
+
+// reflectElem returns the first non-pointer type from the [reflect.Type].
+func reflectElem(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t
 }
 
 // reflectValueIsNil returns the first non-pointer type from the [reflect.Value].

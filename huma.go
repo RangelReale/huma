@@ -97,17 +97,17 @@ func findParams(registry Registry, op *Operation, t reflect.Type) *findResult[*p
 			return nil
 		}
 
-		if f.Type.Kind() == reflect.Pointer {
-			// TODO: support pointers? The problem is that when we dynamically
-			// create an instance of the input struct the `params.Every(...)`
-			// call cannot set them as the value is `reflect.Invalid` unless
-			// dynamically allocated, but we don't know when to allocate until
-			// after the `Every` callback has run. Doable, but a bigger change.
-			panic("pointers are not supported for path/query/header parameters")
-		}
+		// if f.Type.Kind() == reflect.Pointer {
+		// 	// TODO: support pointers? The problem is that when we dynamically
+		// 	// create an instance of the input struct the `params.Every(...)`
+		// 	// call cannot set them as the value is `reflect.Invalid` unless
+		// 	// dynamically allocated, but we don't know when to allocate until
+		// 	// after the `Every` callback has run. Doable, but a bigger change.
+		// 	panic("pointers are not supported for path/query/header parameters")
+		// }
 
 		pfi := &paramFieldInfo{
-			Type: f.Type,
+			Type: reflectElem(f.Type),
 		}
 
 		if def := f.Tag.Get("default"); def != "" {
@@ -137,7 +137,7 @@ func findParams(registry Registry, op *Operation, t reflect.Type) *findResult[*p
 			pfi.Loc = "cookie"
 			name = c
 
-			if f.Type == cookieType {
+			if pfi.Type == cookieType {
 				// Special case: this will be parsed from a string input to a
 				// `http.Cookie` struct.
 				f.Type = stringType
@@ -150,7 +150,7 @@ func findParams(registry Registry, op *Operation, t reflect.Type) *findResult[*p
 
 		var example any
 		if e := f.Tag.Get("example"); e != "" {
-			example = jsonTagValue(registry, f.Type.Name(), pfi.Schema, f.Tag.Get("example"))
+			example = jsonTagValue(registry, pfi.Type.Name(), pfi.Schema, f.Tag.Get("example"))
 		}
 		if example == nil && len(pfi.Schema.Examples) > 0 {
 			example = pfi.Schema.Examples[0]
@@ -163,7 +163,7 @@ func findParams(registry Registry, op *Operation, t reflect.Type) *findResult[*p
 
 		pfi.Name = name
 
-		if f.Type == timeType {
+		if pfi.Type == timeType {
 			timeFormat := time.RFC3339Nano
 			if pfi.Loc == "header" {
 				timeFormat = http.TimeFormat
@@ -211,9 +211,9 @@ func findResolvers(resolverType, t reflect.Type) *findResult[bool] {
 func findDefaults(registry Registry, t reflect.Type) *findResult[any] {
 	return findInType(t, nil, func(sf reflect.StructField, i []int) any {
 		if d := sf.Tag.Get("default"); d != "" {
-			if sf.Type.Kind() == reflect.Pointer {
-				panic("pointers cannot have default values")
-			}
+			// if sf.Type.Kind() == reflect.Pointer {
+			// 	panic("pointers cannot have default values")
+			// }
 			s := registry.Schema(sf.Type, true, "")
 			return convertType(sf.Type.Name(), sf.Type, jsonTagValue(registry, sf.Name, s, d))
 		}

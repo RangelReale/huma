@@ -422,6 +422,90 @@ func TestFeatures(t *testing.T) {
 			},
 		},
 		{
+			Name: "params-ptr",
+			Register: func(t *testing.T, api huma.API) {
+				huma.Register(api, huma.Operation{
+					Method: http.MethodGet,
+					Path:   "/test-params/{string}/{int}/{uuid}",
+				}, func(ctx context.Context, input *struct {
+					PathString   *string    `path:"string" doc:"Some docs"`
+					PathInt      *int       `path:"int"`
+					PathUUID     *UUID      `path:"uuid"`
+					QueryString  *string    `query:"string"`
+					QueryInt     *int       `query:"int"`
+					QueryDefault *float32   `query:"def" default:"135" example:"5"`
+					QueryBefore  *time.Time `query:"before"`
+					QueryDate    *time.Time `query:"date" timeFormat:"2006-01-02"`
+					QueryUint    *uint32    `query:"uint"`
+					QueryBool    *bool      `query:"bool"`
+					QueryStrings []string   `query:"strings"`
+					QueryInts    []int      `query:"ints"`
+					QueryInts8   []int8     `query:"ints8"`
+					QueryInts16  []int16    `query:"ints16"`
+					QueryInts32  []int32    `query:"ints32"`
+					QueryInts64  []int64    `query:"ints64"`
+					QueryUints   []uint     `query:"uints"`
+					// QueryUints8   []uint8   `query:"uints8"`
+					QueryUints16  []uint16    `query:"uints16"`
+					QueryUints32  []uint32    `query:"uints32"`
+					QueryUints64  []uint64    `query:"uints64"`
+					QueryFloats32 []float32   `query:"floats32"`
+					QueryFloats64 []float64   `query:"floats64"`
+					QueryExploded []string    `query:"exploded,explode"`
+					HeaderString  *string     `header:"String"`
+					HeaderInt     *int        `header:"Int"`
+					HeaderDate    *time.Time  `header:"Date"`
+					CookieValue   *string     `cookie:"one"`
+					CookieInt     *int        `cookie:"two"`
+					CookieFull    http.Cookie `cookie:"three"`
+				}) (*struct{}, error) {
+					assert.Equal(t, "foo", *input.PathString)
+					assert.Equal(t, 123, *input.PathInt)
+					assert.Equal(t, UUID{UUID: uuid.MustParse("fba4f46b-4539-4d19-8e3f-a0e629a243b5")}, *input.PathUUID)
+					assert.Equal(t, "bar", *input.QueryString)
+					assert.Equal(t, 456, *input.QueryInt)
+					assert.InDelta(t, 135, *input.QueryDefault, 0)
+					assert.True(t, input.QueryBefore.Equal(time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC)))
+					assert.True(t, input.QueryDate.Equal(time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)))
+					assert.EqualValues(t, 1, *input.QueryUint)
+					assert.True(t, *input.QueryBool)
+					assert.Equal(t, []string{"foo", "bar"}, input.QueryStrings)
+					assert.Equal(t, "baz", *input.HeaderString)
+					assert.Equal(t, 789, *input.HeaderInt)
+					assert.Equal(t, []int{2, 3}, input.QueryInts)
+					assert.Equal(t, []int8{4, 5}, input.QueryInts8)
+					assert.Equal(t, []int16{4, 5}, input.QueryInts16)
+					assert.Equal(t, []int32{4, 5}, input.QueryInts32)
+					assert.Equal(t, []int64{4, 5}, input.QueryInts64)
+					assert.Equal(t, []uint{1, 2}, input.QueryUints)
+					assert.Equal(t, []uint16{10, 15}, input.QueryUints16)
+					assert.Equal(t, []uint32{10, 15}, input.QueryUints32)
+					assert.Equal(t, []uint64{10, 15}, input.QueryUints64)
+					assert.Equal(t, []float32{2.2, 2.3}, input.QueryFloats32)
+					assert.Equal(t, []float64{3.2, 3.3}, input.QueryFloats64)
+					assert.Equal(t, "foo", *input.CookieValue)
+					assert.Equal(t, 123, *input.CookieInt)
+					assert.Equal(t, "bar", input.CookieFull.Value)
+					assert.Equal(t, []string{"foo", "bar"}, input.QueryExploded)
+					return nil, nil
+				})
+
+				// Docs should be available on the param object, not just the schema.
+				assert.Equal(t, "Some docs", api.OpenAPI().Paths["/test-params/{string}/{int}/{uuid}"].Get.Parameters[0].Description)
+
+				// `http.Cookie` should be treated as a string.
+				assert.Equal(t, "string", api.OpenAPI().Paths["/test-params/{string}/{int}/{uuid}"].Get.Parameters[28].Schema.Type)
+			},
+			Method: http.MethodGet,
+			URL:    "/test-params/foo/123/fba4f46b-4539-4d19-8e3f-a0e629a243b5?string=bar&int=456&before=2023-01-01T12:00:00Z&date=2023-01-01&uint=1&bool=true&strings=foo,bar&ints=2,3&ints8=4,5&ints16=4,5&ints32=4,5&ints64=4,5&uints=1,2&uints16=10,15&uints32=10,15&uints64=10,15&floats32=2.2,2.3&floats64=3.2,3.3&exploded=foo&exploded=bar",
+			Headers: map[string]string{
+				"string": "baz",
+				"int":    "789",
+				"date":   "Mon, 01 Jan 2023 12:00:00 GMT",
+				"cookie": "one=foo; two=123; three=bar",
+			},
+		},
+		{
 			Name: "params-error",
 			Register: func(t *testing.T, api huma.API) {
 				huma.Register(api, huma.Operation{
@@ -2059,12 +2143,30 @@ func TestResolverCompositionCalledOnce(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 }
 
-func TestParamPointerPanics(t *testing.T) {
+// func TestParamPointerPanics(t *testing.T) {
+// 	// For now, we don't support these, so we panic rather than have subtle
+// 	// bugs that are hard to track down.
+// 	_, app := humatest.New(t, huma.DefaultConfig("Test API", "1.0.0"))
+//
+// 	assert.Panics(t, func() {
+// 		huma.Register(app, huma.Operation{
+// 			OperationID: "bug",
+// 			Method:      http.MethodGet,
+// 			Path:        "/bug",
+// 		}, func(ctx context.Context, input *struct {
+// 			Param *string `query:"param"`
+// 		}) (*struct{}, error) {
+// 			return nil, nil
+// 		})
+// 	})
+// }
+
+func TestParamPointerDontPanics(t *testing.T) {
 	// For now, we don't support these, so we panic rather than have subtle
 	// bugs that are hard to track down.
 	_, app := humatest.New(t, huma.DefaultConfig("Test API", "1.0.0"))
 
-	assert.Panics(t, func() {
+	assert.NotPanics(t, func() {
 		huma.Register(app, huma.Operation{
 			OperationID: "bug",
 			Method:      http.MethodGet,
@@ -2077,12 +2179,32 @@ func TestParamPointerPanics(t *testing.T) {
 	})
 }
 
-func TestPointerDefaultPanics(t *testing.T) {
+// func TestPointerDefaultPanics(t *testing.T) {
+// 	// For now, we don't support these, so we panic rather than have subtle
+// 	// bugs that are hard to track down.
+// 	_, app := humatest.New(t, huma.DefaultConfig("Test API", "1.0.0"))
+//
+// 	assert.Panics(t, func() {
+// 		huma.Register(app, huma.Operation{
+// 			OperationID: "bug",
+// 			Method:      http.MethodGet,
+// 			Path:        "/bug",
+// 		}, func(ctx context.Context, input *struct {
+// 			Body struct {
+// 				Value *string `json:"value,omitempty" default:"foo"`
+// 			}
+// 		}) (*struct{}, error) {
+// 			return nil, nil
+// 		})
+// 	})
+// }
+
+func TestPointerDefaultNotPanics(t *testing.T) {
 	// For now, we don't support these, so we panic rather than have subtle
 	// bugs that are hard to track down.
 	_, app := humatest.New(t, huma.DefaultConfig("Test API", "1.0.0"))
 
-	assert.Panics(t, func() {
+	assert.NotPanics(t, func() {
 		huma.Register(app, huma.Operation{
 			OperationID: "bug",
 			Method:      http.MethodGet,

@@ -487,7 +487,7 @@ func jsonTag(r Registry, f reflect.StructField, s *Schema, name string) any {
 // This is used by `huma.SchemaFromType` when it encounters a struct, and
 // is used to generate schemas for path/query/header parameters.
 func SchemaFromField(registry Registry, f reflect.StructField, hint string) *Schema {
-	fs := registry.Schema(f.Type, true, hint)
+	fs := registry.Schema(reflectElem(f.Type), true, hint)
 	if fs == nil {
 		return fs
 	}
@@ -679,7 +679,7 @@ func schemaFromType(r Registry, t reflect.Type) *Schema {
 	s := Schema{}
 	t = deref(t)
 
-	v := reflect.New(t).Interface()
+	v := reflect.New(reflectElem(t)).Interface()
 	if sp, ok := v.(SchemaProvider); ok {
 		// Special case: type provides its own schema. Do not try to generate.
 		custom := sp.Schema(r)
