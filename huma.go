@@ -81,33 +81,37 @@ type StreamResponse struct {
 }
 
 type paramFieldInfo struct {
-	Type       reflect.Type
-	Name       string
-	Loc        string
-	Required   bool
-	Default    string
-	TimeFormat string
-	Explode    bool
-	Schema     *Schema
+	Parent      reflect.Type
+	ParentIndex []int
+	Type        reflect.Type
+	Name        string
+	Loc         string
+	Required    bool
+	Default     string
+	TimeFormat  string
+	Explode     bool
+	Schema      *Schema
 }
 
 func findParams(registry Registry, op *Operation, t reflect.Type) *findResult[*paramFieldInfo] {
-	return findInType(t, nil, func(f reflect.StructField, path []int) *paramFieldInfo {
+	return findInType(t, nil, func(parent reflect.Type, f reflect.StructField, path [][]int) *paramFieldInfo {
 		if f.Anonymous {
 			return nil
 		}
 
-		if f.Type.Kind() == reflect.Pointer {
-			// TODO: support pointers? The problem is that when we dynamically
-			// create an instance of the input struct the `params.Every(...)`
-			// call cannot set them as the value is `reflect.Invalid` unless
-			// dynamically allocated, but we don't know when to allocate until
-			// after the `Every` callback has run. Doable, but a bigger change.
-			panic("pointers are not supported for path/query/header parameters")
-		}
+		// if f.Type.Kind() == reflect.Pointer {
+		// 	// TODO: support pointers? The problem is that when we dynamically
+		// 	// create an instance of the input struct the `params.Every(...)`
+		// 	// call cannot set them as the value is `reflect.Invalid` unless
+		// 	// dynamically allocated, but we don't know when to allocate until
+		// 	// after the `Every` callback has run. Doable, but a bigger change.
+		// 	panic("pointers are not supported for path/query/header parameters")
+		// }
 
 		pfi := &paramFieldInfo{
-			Type: f.Type,
+			Parent:      parent,
+			ParentIndex: f.Index,
+			Type:        f.Type,
 		}
 
 		if def := f.Tag.Get("default"); def != "" {
@@ -199,7 +203,7 @@ func findParams(registry Registry, op *Operation, t reflect.Type) *findResult[*p
 }
 
 func findResolvers(resolverType, t reflect.Type) *findResult[bool] {
-	return findInType(t, func(t reflect.Type, path []int) bool {
+	return findInType(t, func(ap reflect.Type, path [][]int) bool {
 		tp := reflect.PointerTo(t)
 		if tp.Implements(resolverType) || tp.Implements(resolverWithPathType) {
 			return true
@@ -209,7 +213,7 @@ func findResolvers(resolverType, t reflect.Type) *findResult[bool] {
 }
 
 func findDefaults(registry Registry, t reflect.Type) *findResult[any] {
-	return findInType(t, nil, func(sf reflect.StructField, i []int) any {
+	return findInType(t, nil, func(parent reflect.Type, sf reflect.StructField, i [][]int) any {
 		if d := sf.Tag.Get("default"); d != "" {
 			if sf.Type.Kind() == reflect.Pointer {
 				panic("pointers cannot have default values")
@@ -228,7 +232,7 @@ type headerInfo struct {
 }
 
 func findHeaders(t reflect.Type) *findResult[*headerInfo] {
-	return findInType(t, nil, func(sf reflect.StructField, i []int) *headerInfo {
+	return findInType(t, nil, func(parent reflect.Type, sf reflect.StructField, i [][]int) *headerInfo {
 		header := sf.Tag.Get("header")
 		if header == "" {
 			header = sf.Name
@@ -245,7 +249,7 @@ func findHeaders(t reflect.Type) *findResult[*headerInfo] {
 }
 
 type findResultPath[T comparable] struct {
-	Path  []int
+	Path  [][]int
 	Value T
 }
 
@@ -253,7 +257,7 @@ type findResult[T comparable] struct {
 	Paths []findResultPath[T]
 }
 
-func (r *findResult[T]) every(current reflect.Value, path []int, v T, f func(reflect.Value, T)) {
+func (r *findResult[T]) every(current reflect.Value, path [][]int, v T, f func(reflect.Value, []int, T)) {
 	if current.Kind() == reflect.Invalid {
 		// Indirect from below may have resulted in no value, for example
 		// an optional field may have been omitted; just ignore it.
@@ -261,13 +265,14 @@ func (r *findResult[T]) every(current reflect.Value, path []int, v T, f func(ref
 	}
 
 	if len(path) == 0 {
-		f(current, v)
+		panic("cannot happen")
+		// f(current, v)
 		return
 	}
 
 	switch current.Kind() {
 	case reflect.Struct:
-		r.every(reflect.Indirect(current.Field(path[0])), path[1:], v, f)
+		r.every(reflect.Indirect(current.FieldByIndex(path[0])), path[1:], v, f)
 	case reflect.Slice:
 		for j := 0; j < current.Len(); j++ {
 			r.every(reflect.Indirect(current.Index(j)), path, v, f)
@@ -281,7 +286,7 @@ func (r *findResult[T]) every(current reflect.Value, path []int, v T, f func(ref
 	}
 }
 
-func (r *findResult[T]) Every(v reflect.Value, f func(reflect.Value, T)) {
+func (r *findResult[T]) Every(v reflect.Value, f func(reflect.Value, []int, T)) {
 	for i := range r.Paths {
 		r.every(v, r.Paths[i].Path, r.Paths[i].Value, f)
 	}
@@ -295,7 +300,7 @@ func jsonName(field reflect.StructField) string {
 	return name
 }
 
-func (r *findResult[T]) everyPB(current reflect.Value, path []int, pb *PathBuffer, v T, f func(reflect.Value, T)) {
+func (r *findResult[T]) everyPB(current reflect.Value, path [][]int, pb *PathBuffer, v T, f func(reflect.Value, T)) {
 	if current.Kind() == reflect.Invalid {
 		// Indirect from below may have resulted in no value, for example
 		// an optional field may have been omitted; just ignore it.
@@ -307,7 +312,7 @@ func (r *findResult[T]) everyPB(current reflect.Value, path []int, pb *PathBuffe
 			f(current, v)
 			return
 		}
-		field := current.Type().Field(path[0])
+		field := current.Type().FieldByIndex(path[0])
 		pops := 0
 		if !field.Anonymous {
 			// The path name can come from one of four places: path parameter,
@@ -333,7 +338,7 @@ func (r *findResult[T]) everyPB(current reflect.Value, path []int, pb *PathBuffe
 				pb.Push(jsonName(field))
 			}
 		}
-		r.everyPB(reflect.Indirect(current.Field(path[0])), path[1:], pb, v, f)
+		r.everyPB(reflect.Indirect(current.FieldByIndex(path[0])), path[1:], pb, v, f)
 		for i := 0; i < pops; i++ {
 			pb.Pop()
 		}
@@ -369,13 +374,13 @@ func (r *findResult[T]) EveryPB(pb *PathBuffer, v reflect.Value, f func(reflect.
 	}
 }
 
-func findInType[T comparable](t reflect.Type, onType func(reflect.Type, []int) T, onField func(reflect.StructField, []int) T, recurseFields bool, ignore ...string) *findResult[T] {
+func findInType[T comparable](t reflect.Type, onType func(reflect.Type, [][]int) T, onField func(reflect.Type, reflect.StructField, [][]int) T, recurseFields bool, ignore ...string) *findResult[T] {
 	result := &findResult[T]{}
-	_findInType(t, []int{}, result, onType, onField, recurseFields, make(map[reflect.Type]struct{}), ignore...)
+	_findInType(t, [][]int{}, result, onType, onField, recurseFields, make(map[reflect.Type]struct{}), ignore...)
 	return result
 }
 
-func _findInType[T comparable](t reflect.Type, path []int, result *findResult[T], onType func(reflect.Type, []int) T, onField func(reflect.StructField, []int) T, recurseFields bool, visited map[reflect.Type]struct{}, ignore ...string) {
+func _findInType[T comparable](t reflect.Type, path [][]int, result *findResult[T], onType func(reflect.Type, [][]int) T, onField func(reflect.Type, reflect.StructField, [][]int) T, recurseFields bool, visited map[reflect.Type]struct{}, ignore ...string) {
 	t = deref(t)
 	zero := reflect.Zero(reflect.TypeOf((*T)(nil)).Elem()).Interface()
 
@@ -408,10 +413,10 @@ func _findInType[T comparable](t reflect.Type, path []int, result *findResult[T]
 			if ignoreAnonymous && f.Anonymous {
 				continue
 			}
-			fi := append([]int{}, path...)
-			fi = append(fi, i)
+			fi := append([][]int{}, path...)
+			fi = append(fi, f.Index)
 			if onField != nil {
-				if v := onField(f, fi); v != zero {
+				if v := onField(t, f, fi); v != zero {
 					result.Paths = append(result.Paths, findResultPath[T]{fi, v})
 				}
 			}
@@ -852,7 +857,8 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 		var cookies map[string]*http.Cookie
 
 		v := reflect.ValueOf(&input).Elem()
-		inputParams.Every(v, func(f reflect.Value, p *paramFieldInfo) {
+		inputParams.Every(v, func(parent reflect.Value, index []int, p *paramFieldInfo) {
+			f := parent.FieldByIndex(index)
 			var value string
 			switch p.Loc {
 			case "path":
@@ -1280,7 +1286,8 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 							}
 						} else {
 							// Set defaults for any fields that were not in the input.
-							defaults.Every(v, func(item reflect.Value, def any) {
+							defaults.Every(v, func(parent reflect.Value, index []int, def any) {
+								item := parent.FieldByIndex(index)
 								if item.IsZero() {
 									item.Set(reflect.Indirect(reflect.ValueOf(def)))
 								}
@@ -1374,7 +1381,8 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 		// Serialize output headers
 		ct := ""
 		vo := reflect.ValueOf(output).Elem()
-		outHeaders.Every(vo, func(f reflect.Value, info *headerInfo) {
+		outHeaders.Every(vo, func(parent reflect.Value, index []int, info *headerInfo) {
+			f := parent.FieldByIndex(index)
 			if f.Kind() == reflect.Slice {
 				for i := 0; i < f.Len(); i++ {
 					writeHeader(ctx.AppendHeader, info, f.Index(i))
