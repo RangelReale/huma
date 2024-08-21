@@ -88,7 +88,7 @@ func (r *mapRegistry) Schema(t reflect.Type, allowRef bool, hint string) *Schema
 		getsRef = false
 	}
 
-	v := reflect.New(t).Interface()
+	v := reflect.New(reflectElem(t)).Interface()
 	if _, ok := v.(SchemaProvider); ok {
 		// Special case: type provides its own schema
 		getsRef = false
