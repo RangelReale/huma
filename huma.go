@@ -253,7 +253,7 @@ type findResult[T comparable] struct {
 	Paths []findResultPath[T]
 }
 
-func (r *findResult[T]) every(current reflect.Value, path []int, v T, f func(reflect.Value, T)) {
+func (r *findResult[T]) every(current reflect.Value, path []int, v T, f func(Value, T)) {
 	if current.Kind() == reflect.Invalid {
 		// Indirect from below may have resulted in no value, for example
 		// an optional field may have been omitted; just ignore it.
@@ -261,13 +261,17 @@ func (r *findResult[T]) every(current reflect.Value, path []int, v T, f func(ref
 	}
 
 	if len(path) == 0 {
-		f(current, v)
+		// f(current, v)
 		return
 	}
 
 	switch current.Kind() {
 	case reflect.Struct:
-		r.every(reflect.Indirect(current.Field(path[0])), path[1:], v, f)
+		if len(path) == 1 {
+			f(&value{current.Field(path[0])}, v)
+		} else {
+			r.every(reflect.Indirect(current.Field(path[0])), path[1:], v, f)
+		}
 	case reflect.Slice:
 		for j := 0; j < current.Len(); j++ {
 			r.every(reflect.Indirect(current.Index(j)), path, v, f)
@@ -281,7 +285,7 @@ func (r *findResult[T]) every(current reflect.Value, path []int, v T, f func(ref
 	}
 }
 
-func (r *findResult[T]) Every(v reflect.Value, f func(reflect.Value, T)) {
+func (r *findResult[T]) Every(v reflect.Value, f func(Value, T)) {
 	for i := range r.Paths {
 		r.every(v, r.Paths[i].Path, r.Paths[i].Value, f)
 	}
@@ -852,7 +856,7 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 		var cookies map[string]*http.Cookie
 
 		v := reflect.ValueOf(&input).Elem()
-		inputParams.Every(v, func(f reflect.Value, p *paramFieldInfo) {
+		inputParams.Every(v, func(f Value, p *paramFieldInfo) {
 			var value string
 			switch p.Loc {
 			case "path":
@@ -1130,13 +1134,15 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 					}
 
 					// Last resort: use the `encoding.TextUnmarshaler` interface.
-					if fn, ok := f.Addr().Interface().(encoding.TextUnmarshaler); ok {
-						if err := fn.UnmarshalText([]byte(value)); err != nil {
-							res.Add(pb, value, "invalid value: "+err.Error())
-							return
+					if f.CanAddr() {
+						if fn, ok := f.Addr().Interface().(encoding.TextUnmarshaler); ok {
+							if err := fn.UnmarshalText([]byte(value)); err != nil {
+								res.Add(pb, value, "invalid value: "+err.Error())
+								return
+							}
+							pv = value
+							break
 						}
-						pv = value
-						break
 					}
 
 					panic("unsupported param type " + p.Type.String())
@@ -1280,7 +1286,7 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 							}
 						} else {
 							// Set defaults for any fields that were not in the input.
-							defaults.Every(v, func(item reflect.Value, def any) {
+							defaults.Every(v, func(item Value, def any) {
 								if item.IsZero() {
 									item.Set(reflect.Indirect(reflect.ValueOf(def)))
 								}
@@ -1374,7 +1380,7 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 		// Serialize output headers
 		ct := ""
 		vo := reflect.ValueOf(output).Elem()
-		outHeaders.Every(vo, func(f reflect.Value, info *headerInfo) {
+		outHeaders.Every(vo, func(f Value, info *headerInfo) {
 			if f.Kind() == reflect.Slice {
 				for i := 0; i < f.Len(); i++ {
 					writeHeader(ctx.AppendHeader, info, f.Index(i))
@@ -1384,7 +1390,7 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 					// Track custom content type.
 					ct = f.String()
 				}
-				writeHeader(ctx.SetHeader, info, f)
+				writeHeader(ctx.SetHeader, info, f.Value())
 			}
 		})
 
