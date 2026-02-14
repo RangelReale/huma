@@ -605,7 +605,7 @@ func writeHeader(write func(string, string), info *headerInfo, f reflect.Value) 
 	}
 }
 
-// RegisterHandler an operation handler for an API. The handler must be a function that
+// NewHandler registers an operation handler for an API. The handler must be a function that
 // takes a context and a pointer to the input struct and returns a pointer to the
 // output struct and an error. The input struct must be a struct with fields
 // for the request path/query/header/cookie parameters and/or body. The output
@@ -626,7 +626,7 @@ func writeHeader(write func(string, string), info *headerInfo, f reflect.Value) 
 //		resp.Body.Message = fmt.Sprintf("Hello, %s!", input.Name)
 //		return resp, nil
 //	})
-func RegisterHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) (*Operation, func(ctx Context)) {
+func NewHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) (*Operation, func(ctx Context)) {
 	oapi := api.OpenAPI()
 	registry := oapi.Components.Schemas
 
@@ -1025,7 +1025,7 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 	oapi := api.OpenAPI()
 	a := api.Adapter()
 
-	regOp, regHandler := RegisterHandler(api, op, handler)
+	regOp, regHandler := NewHandler(api, op, handler)
 
 	if documenter, ok := api.(OperationDocumenter); ok {
 		// Enables customization of OpenAPI documentation behavior for operations.
