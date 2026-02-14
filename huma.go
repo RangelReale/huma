@@ -605,7 +605,7 @@ func writeHeader(write func(string, string), info *headerInfo, f reflect.Value) 
 	}
 }
 
-// registerHandler an operation handler for an API. The handler must be a function that
+// RegisterHandler an operation handler for an API. The handler must be a function that
 // takes a context and a pointer to the input struct and returns a pointer to the
 // output struct and an error. The input struct must be a struct with fields
 // for the request path/query/header/cookie parameters and/or body. The output
@@ -626,8 +626,7 @@ func writeHeader(write func(string, string), info *headerInfo, f reflect.Value) 
 //		resp.Body.Message = fmt.Sprintf("Hello, %s!", input.Name)
 //		return resp, nil
 //	})
-func registerHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error),
-	processOperation func(api API, op *Operation)) (*Operation, func(ctx Context)) {
+func RegisterHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) (*Operation, func(ctx Context)) {
 	oapi := api.OpenAPI()
 	registry := oapi.Components.Schemas
 
@@ -660,10 +659,6 @@ func registerHandler[I, O any](api API, op Operation, handler func(context.Conte
 		op.Errors = append(op.Errors, http.StatusInternalServerError)
 	}
 	defineErrors(&op, registry)
-
-	if processOperation != nil {
-		processOperation(api, &op)
-	}
 
 	resolvers := findResolvers(resolverType, inputType)
 	defaults := findDefaults(registry, inputType)
@@ -1005,10 +1000,6 @@ func registerHandler[I, O any](api API, op Operation, handler func(context.Conte
 	}))
 }
 
-func RegisterHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) (*Operation, func(ctx Context)) {
-	return registerHandler(api, op, handler, nil)
-}
-
 // Register an operation handler for an API. The handler must be a function that
 // takes a context and a pointer to the input struct and returns a pointer to the
 // output struct and an error. The input struct must be a struct with fields
@@ -1033,23 +1024,17 @@ func RegisterHandler[I, O any](api API, op Operation, handler func(context.Conte
 func Register[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) {
 	oapi := api.OpenAPI()
 	a := api.Adapter()
-	// regOp, rhandler := registerHandler(api, op, handler, func(api API, op *Operation) {
-	// 	if documenter, ok := api.(OperationDocumenter); ok {
-	// 		// Enables customization of OpenAPI documentation behavior for operations.
-	// 		documenter.DocumentOperation(op)
-	// 	} else if !op.Hidden {
-	// 		oapi.AddOperation(op)
-	// 	}
-	// })
-	// a.Handle(regOp, rhandler)
-	a.Handle(registerHandler(api, op, handler, func(api API, op *Operation) {
-		if documenter, ok := api.(OperationDocumenter); ok {
-			// Enables customization of OpenAPI documentation behavior for operations.
-			documenter.DocumentOperation(op)
-		} else if !op.Hidden {
-			oapi.AddOperation(op)
-		}
-	}))
+
+	regOp, regHandler := RegisterHandler(api, op, handler)
+
+	if documenter, ok := api.(OperationDocumenter); ok {
+		// Enables customization of OpenAPI documentation behavior for operations.
+		documenter.DocumentOperation(regOp)
+	} else if !op.Hidden {
+		oapi.AddOperation(regOp)
+	}
+
+	a.Handle(regOp, regHandler)
 }
 
 func parseDeepObjectQuery(query url.Values, name string) map[string]string {
