@@ -605,7 +605,7 @@ func writeHeader(write func(string, string), info *headerInfo, f reflect.Value) 
 	}
 }
 
-// Register an operation handler for an API. The handler must be a function that
+// registerHandler an operation handler for an API. The handler must be a function that
 // takes a context and a pointer to the input struct and returns a pointer to the
 // output struct and an error. The input struct must be a struct with fields
 // for the request path/query/header/cookie parameters and/or body. The output
@@ -626,7 +626,8 @@ func writeHeader(write func(string, string), info *headerInfo, f reflect.Value) 
 //		resp.Body.Message = fmt.Sprintf("Hello, %s!", input.Name)
 //		return resp, nil
 //	})
-func Register[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) {
+func registerHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error),
+	processOperation func(api API, op *Operation)) func(ctx Context) {
 	oapi := api.OpenAPI()
 	registry := oapi.Components.Schemas
 
@@ -660,17 +661,13 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 	}
 	defineErrors(&op, registry)
 
-	if documenter, ok := api.(OperationDocumenter); ok {
-		// Enables customization of OpenAPI documentation behavior for operations.
-		documenter.DocumentOperation(&op)
-	} else if !op.Hidden {
-		oapi.AddOperation(&op)
+	if processOperation != nil {
+		processOperation(api, &op)
 	}
 
 	resolvers := findResolvers(resolverType, inputType)
 	defaults := findDefaults(registry, inputType)
-	a := api.Adapter()
-	a.Handle(&op, api.Middlewares().Handler(op.Middlewares.Handler(func(ctx Context) {
+	return api.Middlewares().Handler(op.Middlewares.Handler(func(ctx Context) {
 		var input I
 
 		// Get the validation dependencies from the shared pool.
@@ -1005,7 +1002,45 @@ func Register[I, O any](api API, op Operation, handler func(context.Context, *I)
 		} else {
 			ctx.SetStatus(status)
 		}
-	})))
+	}))
+}
+
+func RegisterHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) func(ctx Context) {
+	return registerHandler(api, op, handler, nil)
+}
+
+// Register an operation handler for an API. The handler must be a function that
+// takes a context and a pointer to the input struct and returns a pointer to the
+// output struct and an error. The input struct must be a struct with fields
+// for the request path/query/header/cookie parameters and/or body. The output
+// struct must be a struct with fields for the output headers and body of the
+// operation, if any.
+//
+//	huma.Register(api, huma.Operation{
+//		OperationID: "get-greeting",
+//		Method:      http.MethodGet,
+//		Path:        "/greeting/{name}",
+//		Summary:     "Get a greeting",
+//	}, func(ctx context.Context, input *GreetingInput) (*GreetingOutput, error) {
+//		if input.Name == "bob" {
+//			return nil, huma.Error404NotFound("no greeting for bob")
+//		}
+//		resp := &GreetingOutput{}
+//		resp.MyHeader = "MyValue"
+//		resp.Body.Message = fmt.Sprintf("Hello, %s!", input.Name)
+//		return resp, nil
+//	})
+func Register[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) {
+	oapi := api.OpenAPI()
+	a := api.Adapter()
+	a.Handle(&op, registerHandler(api, op, handler, func(api API, op *Operation) {
+		if documenter, ok := api.(OperationDocumenter); ok {
+			// Enables customization of OpenAPI documentation behavior for operations.
+			documenter.DocumentOperation(op)
+		} else if !op.Hidden {
+			oapi.AddOperation(op)
+		}
+	}))
 }
 
 func parseDeepObjectQuery(query url.Values, name string) map[string]string {
