@@ -138,6 +138,11 @@ func (c *gmuxContext) BodyWriter() io.Writer {
 	return c.w
 }
 
+// NewContext creates a new Huma context from an HTTP request and response.
+func NewContext(op *huma.Operation, r *http.Request, w http.ResponseWriter) huma.Context {
+	return &gmuxContext{op: op, r: r, w: w}
+}
+
 type gMux struct {
 	options
 	router *mux.Router
@@ -160,6 +165,11 @@ func (a *gMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.router.ServeHTTP(w, r)
 }
 
+// NewAdapter creates a new adapter for the given HTTP mux.
+func NewAdapter(r *mux.Router, options ...Option) huma.Adapter {
+	return &gMux{router: r, options: parseOptions(options)}
+}
+
 func New(r *mux.Router, config huma.Config, options ...Option) huma.API {
-	return huma.NewAPI(config, &gMux{router: r, options: parseOptions(options)})
+	return huma.NewAPI(config, NewAdapter(r, options...))
 }
