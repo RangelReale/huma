@@ -627,7 +627,7 @@ func writeHeader(write func(string, string), info *headerInfo, f reflect.Value) 
 //		return resp, nil
 //	})
 func registerHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error),
-	processOperation func(api API, op *Operation)) func(ctx Context) {
+	processOperation func(api API, op *Operation)) (*Operation, func(ctx Context)) {
 	oapi := api.OpenAPI()
 	registry := oapi.Components.Schemas
 
@@ -667,7 +667,7 @@ func registerHandler[I, O any](api API, op Operation, handler func(context.Conte
 
 	resolvers := findResolvers(resolverType, inputType)
 	defaults := findDefaults(registry, inputType)
-	return api.Middlewares().Handler(op.Middlewares.Handler(func(ctx Context) {
+	return &op, api.Middlewares().Handler(op.Middlewares.Handler(func(ctx Context) {
 		var input I
 
 		// Get the validation dependencies from the shared pool.
@@ -1005,7 +1005,7 @@ func registerHandler[I, O any](api API, op Operation, handler func(context.Conte
 	}))
 }
 
-func RegisterHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) func(ctx Context) {
+func RegisterHandler[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) (*Operation, func(ctx Context)) {
 	return registerHandler(api, op, handler, nil)
 }
 
@@ -1033,7 +1033,16 @@ func RegisterHandler[I, O any](api API, op Operation, handler func(context.Conte
 func Register[I, O any](api API, op Operation, handler func(context.Context, *I) (*O, error)) {
 	oapi := api.OpenAPI()
 	a := api.Adapter()
-	a.Handle(&op, registerHandler(api, op, handler, func(api API, op *Operation) {
+	// regOp, rhandler := registerHandler(api, op, handler, func(api API, op *Operation) {
+	// 	if documenter, ok := api.(OperationDocumenter); ok {
+	// 		// Enables customization of OpenAPI documentation behavior for operations.
+	// 		documenter.DocumentOperation(op)
+	// 	} else if !op.Hidden {
+	// 		oapi.AddOperation(op)
+	// 	}
+	// })
+	// a.Handle(regOp, rhandler)
+	a.Handle(registerHandler(api, op, handler, func(api API, op *Operation) {
 		if documenter, ok := api.(OperationDocumenter); ok {
 			// Enables customization of OpenAPI documentation behavior for operations.
 			documenter.DocumentOperation(op)

@@ -34,6 +34,12 @@ func Unwrap(ctx huma.Context) (*http.Request, http.ResponseWriter) {
 	panic("not a humago context")
 }
 
+func Wrap(op *huma.Operation, handler func(ctx huma.Context)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler(NewContext(op, r, w))
+	})
+}
+
 type goContext struct {
 	op     *huma.Operation
 	r      *http.Request
